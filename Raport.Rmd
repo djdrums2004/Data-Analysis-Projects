@@ -1,0 +1,325 @@
+---
+title: "raport"
+author: "Andrzej Danieluk"
+date: "2025-02-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#wszytskie zmienne globhalne, nazwy bibliotek i inne definicja globalne
+#https://www.kaggle.com/datasets/nelgiriyewithana/countries-of-the-world-2023
+library(readxl)
+library(knitr)
+library(dplyr)
+library(gt)
+library(ggplot2)
+library(knitr)
+library(devtools)
+library(silvermantest)
+library(diptest)
+library(outliers)
+library(heatmaply)
+library(uwot)
+library(plotly)
+library(tidyr)
+library(randomForest)
+devtools::install_github("jenzopr/silvermantest")
+dane <- read_excel("C:/Users/djdru/OneDrive/Pulpit/Projekt koniec/dane2.xlsx",col_names=TRUE,sheet="dane")
+dane_numeric <- dane[sapply(dane, is.numeric)]
+regiony <- split(dane[, c("GDP", "Population", "Land Area(Km2)", 
+                          "Armed Forces size", "Life expectancy", 
+                          "Minimum wage", "Unemployment rate (%)")], dane$Region)
+dane$Region <- as.factor(dane$Region)
+dane_numeric <- dane[sapply(dane, is.numeric)]
+dane_numeric_clean <- na.omit(dane_numeric)
+format_summary <- function(region_data) {
+  stats <- c("Min", "1st Qu.", "Median", "Mean", "3rd Qu.", "Max", "NA's")
+  summary_df <- as.data.frame(summary(region_data))  # Konwersja do data.frame
+  summary_df <- cbind(Statystyka = stats, summary_df)  # Dodanie etykiety statystyk
+  return(summary_df)
+}
+knitr::opts_chunk$set(echo = TRUE)
+remotes::install_github("jenzopr/silvermantest")
+```
+
+## Opis danych i cel projektu
+Dane pochodzę ze strony www.kaggle.com, składają się z 35 cech oraz 195 obserwacji. Pochodzą one z 2023 roku, a cechy określające wartości pieniężne są wyrażane w dolarach. Aby urozmaicić analizę dodałem dodatkową zmienną "Region", która przypisuje kontynent każdemu krajowi, więc końcowo moje dane mają 36 obserwacji.
+Charakterystyka zmiennych: zmienne "Country", "Largest city" i "Abbreviation" to zmienne kategoryczne nominalne identyfikujące kraj. Zmienna "Region", "Currency-Code" i "Official language" są również takie, ale można je można wykorzystać do grupowania danych. Reszta cech odpowiada za zmienne numeryczne ciągłe, bądź skokowe, jak "CPI", "GDP", "Population", "Gasoline Price" itd.
+
+## Opis analizy
+1 - statystyki sumaryczne dla zmiennych niezależnych
+2 - obserwacje odstające i wielomodalność
+3 - korelacja pomiędzy zmiennymi
+4 - redukcja wymiaru
+5 - klasyfikacja bez nadzoru
+6 - klsyfikacja pod nadzorem
+
+## Statystyki sumaryczne
+
+```{r sumstats}
+#podstawowe dane dla każdej zmiennej
+apply(dane_numeric, 2, summary)
+#mało z tego możemy wyciągnąć, więc weźmy kilka najważniejszych cech
+summary(dane[,c("GDP","Population","Land Area(Km2)","Armed Forces size","Life expectancy","Minimum wage","Unemployment rate (%)")])
+#A teraz podzielmy to sobie na regiony.
+kable(summary(regiony$Asia), digits = 2, caption = "Podsumowanie dla Azji")
+kable(summary(regiony$Europe), digits = 2, caption = "Podsumowanie dla Europy")
+kable(summary(regiony$Africa), digits = 2, caption = "Podsumowanie dla Afryki")
+kable(summary(regiony$`North America`), digits = 2, caption = "Podsumowanie dla Ameryki Północnej")
+kable(summary(regiony$`South America`), digits = 2, caption = "Podsumowanie dla Ameryki Południowej")
+kable(summary(regiony$Oceania), digits = 2, caption = "Podsumowanie dla Oceanii")
+#super, ale co nam to mówi?
+#porównajnmy sobie teraz tylko płacę minimalną
+unique(dane$Region)  
+all_data <- dane %>% select(Country, Region, `Minimum wage`)
+all_data <- all_data %>% mutate(`Minimum wage` = as.numeric(`Minimum wage`))
+region_summary <- all_data %>%
+  group_by(Region) %>%
+  summarise(
+    Min = min(`Minimum wage`, na.rm = TRUE),
+    `1st Qu.` = quantile(`Minimum wage`, 0.25, na.rm = TRUE),
+    Median = median(`Minimum wage`, na.rm = TRUE),
+    Mean = mean(`Minimum wage`, na.rm = TRUE),
+    `3rd Qu.` = quantile(`Minimum wage`, 0.75, na.rm = TRUE),
+    Max = max(`Minimum wage`, na.rm = TRUE),
+  )
+kable(region_summary, digits = 2, caption = "Porównanie płacy minimalnej dla wszystkich regionów")
+#a teraz, żeby jeszcze lepiej wiedzieć na co się patrzy, stwórzmy wykresy poudełkowe
+outliers <- all_data %>%
+  group_by(Region) %>%
+  mutate(Q1 = quantile(`Minimum wage`, 0.25, na.rm = TRUE),
+         Q3 = quantile(`Minimum wage`, 0.75, na.rm = TRUE),
+         IQR = Q3 - Q1) %>%
+  filter(`Minimum wage` < (Q1 - 1.5 * IQR) | `Minimum wage` > (Q3 + 1.5 * IQR)) %>%
+  select(Country, Region, `Minimum wage`)
+ggplot(all_data, aes(x = Region, y = `Minimum wage`, fill = Region)) +
+  geom_boxplot(outlier.colour = "black", outlier.shape = 16, outlier.size = 2) +  
+  geom_text(data = outliers, aes(x = Region, y = `Minimum wage`, label = Country), 
+            hjust = -0.2, size = 3, color = "black", check_overlap = TRUE) +  
+  labs(title = "Porównanie płacy minimalnej w różnych regionach",
+       x = "Region", y = "Minimum Wage") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+Wnioski:
+Co ciekawego możemu odczytać z wykresu? Najbardziej oczywistym wnioskiem jest to, że w całej Europie statystyki dostyczące płacy minimalnej wyglądają zdecydowanie najlepiej. W porównaniu z np Azją, w której przynajmniej 75% krajów ma płacę minimalną niewiększą niż 1,25\$, to w Europie niemniej niż 25% krajów ma płace niemniejszą niż 1,57\$, co jest i tak więkaszą kwotą. Po ludzku - przynajmniej 75% krajów w Europie ma minimalną płacę większą, niż minimalna płaca 75% krajów Azji. Jeśli dodatkowo weźmiemy pod uwagę to, o ile większa jest łączna populacja Azji, wynosząca ok 4,5mld ludzi, a  w Europie ok 0,75mld, to staje się to ogromną dysproporcją.
+A jeśli dodatkowo porównamy nasze dane z Europy z Afryką, w której największa minimalna płaca wynosi 2\$, co jest i tak dużym odstępstwem w porównaniu z kwotą 0,62, której nie przekracza 75% krjów, to widzimy, że tylko 25% krajów Europy ma płacę minimalną mniejszą od najwyższej płacy minimalnej w całej Afryce. Dodatkowo, najbardziej rzucającą się w oczy dosproporcją na Wykresie, jest wartość odstająca Australi. W porównaniu z całą Oceanią, Australia ma wyjątkowo dużą płacę minimalną, wynoszącą aż 13,59$, kiedy mediana całej Oceanii wynosi tylko 1,56.
+
+## Obserwacje odstające i wielomodalność
+
+```{r hist}
+#teraz zbadamy historgramy
+for (i in 1:29) {
+  hist(as.numeric(dane_numeric[[i]]), 
+       main = paste("Histogram dla zmiennej:", names(dane_numeric)[i]), 
+       xlab = names(dane_numeric)[i])
+}
+```
+Można zauważyć, że zmienne Agricultural land, Birth Rate, Fertility Rate, Forested Area oraz Latitude są potencjalnymi wielomodalnymi kandydatami. Która z tych zmiennych powie nam coś ciekawego? Oczywiście Birth Rate i Fertility rate, które są ściśle ze sobą ściśle związane i mówią o odpowiednio o tym ile rodzi się dzieci na 1000 osób oraz ile średnio dzieći rodzi kobieta w ciągu swojego życia. Chce wskazać pewne ciekawe zjawisko. Porównajmy sobie dane dla Europy i Afryki.
+```{r cos}
+africa_data <- dane[dane$Region == "Africa", ]
+europe_data <- dane[dane$Region == "Europe", ]
+boxplot(africa_data$`Birth Rate`, europe_data$`Birth Rate`, 
+        names = c("Africa", "Europe"), 
+        main = "Porównanie wskaźnika urodzeń w Afryce i Europie", 
+        ylab = "Wskaźnik urodzeń")
+```
+Jaki możemy wyciągnąć z tego wniosek? Bardzo oczywisty, w Europie nie rodzą się dzieci. U nas jest to średno około 10 dzieci na 1000 ludzi, kiedy w całej Afryce jest ponad 3 razy więcej!
+Przejdźmy dalej i zobaczmy które cechy mają rozkład normalny.
+```{r qqplot}
+d1 <- as.matrix(dane_numeric_clean)
+d1 <- apply(d1,2,function(x) (x-mean(x))/sd(x))
+for (i in 1:29) {
+  qqnorm(d1[, i], main = colnames(dane_numeric_clean)[i])
+  qqline(d1[, i], col = "red")
+}
+```
+Na temat tych danych, możemy poweidzieć, że zmienne Life excpectancy, Tax revenue, Labor force participation oraz Gassoline price mają rozkład normalny. Co cikawego można z tego wyciągnąć? No np. że oczekiwana długość życia dla każdego kraju nie wacha się jakoś niesamowicie mocno, a jest raczej skumulowana przy wartościach 70-75 lat, co jest raczej dobrą nowiną. Przejdźmy dalej.
+```{r silverman}
+#zbadajmy wielomodalność
+results <- data.frame(Variable = colnames(d1), P_Value = NA, Multimodal = NA)
+for (i in 1:ncol(d1)) {
+  x <- d1[, i]
+  if (length(x) > 1) {  
+    test_result <- silverman.test(x, k = 1)  
+    p_value <- slot(test_result, "p_value")
+    results$P_Value[i] <- p_value
+    results$Multimodal[i] <- ifelse(p_value < 0.05, "Tak", "Nie")
+  } else {
+    results$P_Value[i] <- NA
+    results$Multimodal[i] <- "Za mało danych"
+  }
+}
+print(results)
+```
+Widzimy, że test silvermana wskazuje na bardzo silną wielomodalność w wielu przypadkach, np dla zmiennej Armed Forces size, Co2-Emissions, CPI, GDP, Population równą 0,000000, ale czy jest to w ogóle możliwe? Kłuci się to z powyższymi histogramami dla tych zmiennych. Oprócz tego silverman wskazuje na to, że zmienne CPI Change (%), Gross primary education enrollment (%), Minimum wage, Total tax rate (%), Latitude, Longitude też są wielomodalne, ale ich histogramy, przynajmniej w większości na to nie wskazują. Co jest więc nie tak? Test silvermana jest podatny na skrajne wartości odstające, w przypadku kiedy mamy doczynienia z silną skośnością. Wykonajmy więc test Hartigana-Dipa dla wymienionych zmiennych i sprawdźmy, czy cechy te są rzeczywiście wielomodalne.
+```{r diptest}
+selected_variables <- c("Armed Forces size", "Co2-Emissions", "CPI", "GDP", "Population", "CPI Change (%)", "Gross primary education enrollment (%)", "Minimum wage", "Total tax rate (%)", "Latitude", "Longitude")
+dip_results <- data.frame(Variable = selected_variables, P_Value = NA, Multimodal = NA)
+dip_results <- data.frame(
+  Variable = selected_variables,
+  P_Value = sapply(selected_variables, function(var) {
+    x <- na.omit(dane_numeric[[var]])
+    if (length(x) > 1) dip.test(x)$p.value else NA
+  })
+)
+dip_results$Multimodal <- ifelse(dip_results$P_Value < 0.05, "Tak", "Nie")
+dip_results$Multimodal[is.na(dip_results$P_Value)] <- "Za mało danych"
+print(dip_results, row.names = FALSE)
+``` 
+Oho, okazało się że prawie żadna cecha, którą pzreanalizowaliśmy nie jest wielomodalna, mimo że test silvermana na to wskazywał. Co więc możemy powiedzieć? Jedyna cecha, o której możemy powiedzieć, że jest wielomodalna, to Longitude oraz, ale cecha Latitude też jest tego blisko. Co możemy z tego wyciągnąć? No coś na pewno. Jeśli spojrzymy na histogramy tych dwóch cech, to zobaczymy, że dane są skoncentrowane dla Longitude przy (-100,-50), czyli głównie Ameryka Łacińska, ale w znacznej większości przy (0,50), co jest długością Europy, Afryki i bliskiego wschodu. Jednak jeśli chodzi o Latitude, to dominują tutaj przedziały (10, 20) - szerokość obejmująca obszary między zwrotnikiem Raka i równikiem, czyli Azja południowa, Ameryka środkowa oraz południowe obszary Sahary, a drugim przedziałem jest (40,50), czyli Azja środkowa, Europa południowa oraz Ameryka północna. Jakiś sensowny wniosek? Wiekszość krajów jest skoncentrowana na wysokości Europy i Afryki, szczególnie na wysokości południowej Sahary i południowo/centralnej Euopy. A więc żyjemy w miejscu, które znajduje się w najbardziej zagęszczonych regionach pod względem ilości krajów na całym globie!
+```{r grubbs}
+#teraz spójrzmy na obserwacje odstające
+grubbs_results <- tibble(
+  Variable = colnames(dane_numeric_clean),
+  P_Value = sapply(dane_numeric_clean, function(x) {
+    x <- na.omit(x)
+    if (length(x) > 2) grubbs.test(x)$p.value else NA
+  }),
+  Outlier = sapply(dane_numeric_clean, function(x) {
+    x <- na.omit(x)
+    if (length(x) > 2) {
+      test <- grubbs.test(x)
+      if (test$p.value < 0.05) ifelse(grepl("highest", test$alternative), "Największa", "Najmniejsza") else "Brak"
+    } else NA
+  }),
+  Outlier_Value = sapply(dane_numeric_clean, function(x) {
+    x <- na.omit(x)
+    if (length(x) > 2) {
+      test <- grubbs.test(x)
+      if (test$p.value < 0.05) ifelse(grepl("highest", test$alternative), max(x), min(x)) else NA
+    } else NA
+  })
+)
+print(grubbs_results, n = Inf)
+#fajnie, a teraz weźmy sobie najbardziej ostające cechy i sprawdźmy dla których krajów one są
+
+selected_features <- c("Land Area(Km2)", "Armed Forces size", "Co2-Emissions", "CPI", 
+                      "GDP", "Population", "Total tax rate (%)", "Urban_population")
+for (feature in selected_features) {
+  max_value <- max(dane_numeric_clean[[feature]], na.rm = TRUE)
+  country <- dane$Country[which(dane[[feature]] == max_value)[1]]
+  cat("Cecha:", feature, "\nWartość:", max_value, "\nKraj:", country, "\n\n") 
+}
+```
+Są tu pewne oczywistości, Rosja z największą powierzchnią kraju, Stany z największym GDP oraz Chiny, które którlują aż w 3 cechach - populacji, populacji miejskiej, oraz w emisji Co-2 (co też nie powinno nikogo dziwić). Jednak oprócz tego możemy wczytać stąd kilka ciekawych rzeczy. Po pierwsze - niesamowicie wysokie podatki w Argentynie wynoszące aż 106,3%, co w 2023 roku było częścią radykalnego planu władzy Argentyny, aby uspokić inflacje, a jak po czasie się okazało - planu skutecznego. Oprócz tego ogromnie wysoki wskaźnik CPI w Sudanie mówiący o szającej inflacji, ale też Niesamowicie liczna armia Indii, co może być zaskoczeniem w świecie zdominowanym przez armię USA.
+Dane te są wyjątkowo odstające od reszty, jednak są one kluczowe w naszej analizie, ponieważ pokazują diametralne różnice między różnymi krajami.
+
+## Korelacja pomiędzy zmiennymi
+
+Zbadajmy teraz korelacje
+```{r cor}
+mac.kor <- cor(dane_numeric, use = "pairwise.complete.obs")
+heatmaply_cor(mac.kor)
+```
+Najpierw zajmijmy się oczywistymi rzeczami. Jednymi z najbardziej zależnych od siebie zmiennych to birth rate i feritlity rate, które opisują tak naprawdę tą samą rzecz - ile rodzi się dzieci, tylko sposób miary w obu przypadkach jest troszeczkę inny, Bith rate wskazuje ile rodzi się dzieci na 1000 osób, a feritility rate średnio ile dzieci rodzi kobieta podczas swojego życia. Jednak z tymi zmiennymi silnie związana jest cecha Infant Mortality oraz Metrnal Mortality ratio, co jest bardzo logiczne, ponieważ im więcej urodzeń tym więcej będzie śmierci noworodków, lub matek poprzez czynniki ciążowe. Kolejną oczywistością jest silna korelacja między CPI a CPI change, w co raczej nie ma sensu sie wgłębiać. Przejdźmy teraz do najciekawszych, ale też całkiem oczywistych zależnośći - mianowicie związku między population, urban_population, Co2-Emissions, oraz Armed Force Size. Co najbardziej widoczne, population silnie wpływa na urban population, im większa populacja ogólnie w kraju, tym większa populacja w miastach. Jedak też im większa populacja, tym większa armia, między innimy dlatego Inddie moga się pochwalić tak licznym wojskiem. Oprócz tego im bardziej zaludnione miasto, tym większa emisja Co-2, która jest tez mocno powiązana z wielkością armii krajowej - w końcu wojsko odopiwada za około 5,5% emisji Co2 na świecie (https://www.theguardian.com/commentisfree/2024/jan/09/emission-from-war-military-gaza-ukraine-climate-change). Z wykresu możemy też wyczytać, że GDP też ma swój wkład w emisje Co-2, ponieważ im bogatsza jest gospodarka, tym - większe wojsko, ale też tym więcej osób może pozwolić sobie na wydatki związane z np jazdą samochodem, lotami saolotem itd. Jednak najciekawszą korelacją jest związek między Physicians per thousand (lekarze na 1000), Gross tertiary education enrollment (Liczba zapisanych osob do szkół brutto), Life expectancy (oczekiwana długość życia). Jaki płynie z tego wniosek? Taki, że im więcej osób zapisanych do szkół w kraju, tym więcej lekarzy, a co za tym idzie - włydłużona zostaje oczekiwana długość życia.
+
+## Redukcja wymiaru
+```{r pca}
+dane2<-as.matrix(dane_numeric)
+dane2<-na.omit(dane2)
+dane2<-apply(dane2, 2, function(x) x/sd(x))
+pca2 <- prcomp(dane2)
+summary(pca2)
+screeplot(pca2, npcs = 29, type = "lines", main = "Scree Plot")
+```
+
+Metodą łokcia możemy zobaczyć, że 3 pierwsze składowe są najistotniejsze
+
+```{r umap}
+umap(dane2,n_neighbors=5)->uw2.5
+umap(dane2,n_neighbors=13)->uw2.13
+par(mfrow=c(1,2)); plot(uw2.5); plot(uw2.13)
+```
+
+widzimy 3 klastry
+
+```{r pca ryc}
+dane_filtered <- dane[1:nrow(pca2$x), ]
+df <- data.frame(
+  x = pca2$x[, 1],
+  y = pca2$x[, 2],
+  z = pca2$x[, 3],
+  color = dane_filtered$GDP_per_person
+)
+dane_dist_pca <- dist(pca2$x[, 1:3])
+
+plot_ly(df, x = ~x, y = ~y, z = ~z, color = ~color, type = 'scatter3d')
+```
+Chciałem zobaczyć, czy kraje będą układać się poprzez swoją klasę - od biednych do bogatych, dlatego sworzyłem nową zmienną GDP_per_person. Jednak ten pomysł okazał się być błędny. Moje dane nie układają się w taki sposób, w jaki można by było oczekiwać. Majątek kraju to tylko jeden z wielu czynników, który powoduje że jedne obserwacje są bliżej drugich, wiec podział bazujący tylko na tym oczywiście, że okazał się być mylny. Pod koniec projektu wrócimy sobie do tego wykresu.
+Wźmy sobie 3 klastry
+
+
+## Klastrowanie
+
+
+```{r ksrednich}
+kmeans(dane2,centers=3)->km3
+kmeans(uw2.13,centers=3)->km3.u
+kmeans(pca2$x[,1:3],centers=3)->km3.p
+plot(uw2.13,col=km3.u$cluster)
+
+kmeans_result <- kmeans(dane2, centers = 3)
+```
+Jak widać mamy 3 klastry, 2 większe i jeden mniejszy. Zobaczmy teraz jak to będzie wyglądało w przypadku klastrowania chierarchicznego.
+
+```{r hier}
+hclust_pca <- hclust(dane_dist_pca, method = "ward.D2")
+clusters_pca <- cutree(hclust_pca, k = 3)
+remaining_indices <- which(!is.na(rowSums(dane_numeric)))
+dane$cluster_pca <- NA  # Tworzymy nową kolumnę z NA
+dane$cluster_pca[remaining_indices] <- as.factor(clusters_pca)
+hclust_pca <- hclust(dane_dist_pca, method = "ward.D2")
+# Krok 4: Wizualizacja dendrogramu z nazwami krajów tylko dla wybranych wierszy
+plot(hclust_pca, labels = dane$Country[remaining_indices],  # Dopasowanie liczby etykiet
+     main = "Dendrogram na podstawie 3 głównych skład. PCA", 
+     xlab = "", ylab = "Odległość", cex = 0.7)
+rect.hclust(hclust_pca, k = 3, border = "blue")
+
+clusters_pca <- cutree(hclust_pca, k = 3)
+dane$cluster_pca[remaining_indices] <- as.factor(clusters_pca)
+```
+Tak samo - 2 większe i jeden mniejszy klaster. Moje domniemania są, że widzimy w naszych danych podział na 3 klasy: kraje "większe", kraje "średnie" oraz kraje "mniejsze". Midzimy wyraźny podział - ogromne państwa z wielką gospodarką, armią, populacją i GDP, czyli środkowy klaster nazwę krajami większymi, prawy klaster nazwę krajami "średnimi", jak np Polska, a lewy, największy klaster nazwę państwami "mniejszymi". Żeby zbadać, które dokładnie cechy decydują o tym, do której klasy należy kraj, stwórzmy nową cehcę "Klasa", która będzie przypisywała wartości o których mówię. Jednak jeszcze przed tym chciałbym zwrócić na coś uwagę - Polska na dendrogramie jest najbliżej... Urugwaju. Jak widać są to kraje po jakimiś względami do siebie najbardziej zbliżone. W końcu Urugwaj to jeden z najbardziej wyróżniających się krajów Ameryki Południowej pod względem np GDP oraz poziomu bezrobocia, więc może sprawdźmy które cechy są najważniejsze dla cechy "klasa".
+
+```{r class}
+dane_klasa <- dane_numeric_clean
+dane_klasa$Klasa <- factor(clusters_pca, labels = c("Kraje mniejsze", "Kraje średnie", "Kraje większe"))
+```
+Mamy teraz nową cechę "Klasa". Zanim sprawdzimy, które cechy są w niej najważniejsze, wróćmy do jednego z poprzednich wykresów, żeby sprawdzić jak nasze dane układają się w 3 wymarach.
+```{r pca ryc 2}
+df <- data.frame(
+  x = pca2$x[, 1],
+  y = pca2$x[, 2],
+  z = pca2$x[, 3],
+  color = dane_klasa$Klasa
+)
+dane_dist_pca <- dist(pca2$x[, 1:3])
+
+plot_ly(df, x = ~x, y = ~y, z = ~z, color = ~color, type = 'scatter3d')
+```
+Jak widać, wygląda to o wiele lepiej niż poprzednio. Nie można kategoryzować krajów tylko ze względu na GDP_per_person, ponieważ taki podział nie ma sensu. Jest o wiele więcej czynników, które powodują, że kraj jest "Mniejszy" lub "większy". Sprawdźmy, które to cechy.
+## Analiza pod nadzorem
+```{r rf}
+rfcv(dane2,as.factor(dane_klasa$Klasa))->rf2
+rf2$error.cv
+randomForest(dane2,as.factor(dane_filtered$Region),importacne=T)->rf2.i
+varImpPlot(rf2.i)
+```
+Jak widać, błąd klasyfikacji w każdym przypadku jest całkiem duży, ale więc możemy zredukować nasze dane do 8 cech: Urban population, Calling code, Unemplyment rate, Land Area, Out of pocket healt expedinture, CPI change, CPI oraz Population. Zobaczmy jak wyglądają wykresy pudełkowe dla każdej z tych cech dla każdej klasy. W ten sposób będziemy mogli wyciągnąć wnioski - jakie wartości dla tych cech decydują o klasie kraju.
+
+```{r box}
+features <- c("Urban_population", "`Calling Code`", "`Unemployment rate (%)`", "`Land Area(Km2)`","`Out of pocket health expenditure (%)`", "`CPI Change (%)`", "Population", "CPI")
+
+for (feature in features) {
+  p <- ggplot(dane_klasa, aes_string(x = "Klasa", y = feature, fill = "Klasa")) +
+    geom_boxplot() +
+    labs(title = paste("Boxplot for", feature, "by Class"), y = feature, x = "Class") +
+    theme_minimal()
+  print(p)
+}
+```
+Po pierwsze widzimy, że kraje "większe" to kraje z ogromną populacją miejską, średnio 400000000 ludzi żyjących w miastach, kiedy w pozostałych klasach ta średnie jest o wiele mniejsza. Zmienna Calling Code nie ma realnego wpływu na "standard" kraju, jednak jak widać jest tu pewna zależność. Kraje największe mają najniższe kody telefoniczne, a pozostały dwie klasy mają kwartyle podobne do siebie, jednak średnia dla krajów rozwijających się jest niższa niż dla krajów średnich. Dalej mamy unemployment rate i co zaskakujące - stopa bezrobocia we wszytskich klasach jest podobna, z tym że dla krajów mniejszych ta stopa jes najmniejsza, choć są tu też widoczne wartości odstające, osiągające nawet ponad 20%. Jeśli chodzi o powierzchnie krajów, to jak widać kraje większe tutaj zdecydowanie dominują, a kraje mniejsze i średnie są raczej na podobnym poziomie. Jeśli jednak chodzi o prywatne wydatki na zdrowie, to kraje średnie mają je najniższe, jednak z wyraźnymi wartościamy odstającymi. Jeśli chodzi o CPI change, to kraje średnie mają tutaj najmniejszą średnią, czyli widzimy najmniejsze zmiany cen na przestrzeni czasu, wynoszące średnio tylko kilka procent. Dla krajów większych ten wynik jest troszkę wyższy, co może wynikać z ich ogromnej, zawsze pędzącej do przodu gospodarki. Jednak Najciekawiej to wygląda dla krajów mniejszych, gdzie średnia jest też na całkiem niskim poziomie, jednak mamy też tutaj doczynienia z wieloma wartościami odstającymi, co może sugerować chwiejność gospodarczą tych krajó. Jeśli chodzi o populacje, to jak widać kraje większe mają ją zdecydowanie większą w porownaniu z krajami średnimi oram mniejszymi, które jednak(te drugie) mają całkiem dużo wartości odstających. Jeśli chodzi o CPI to znowu mamy sytuacje podobną do CPI change, tylko że tutaj wartości odstające dla krajów mniejszych są zdecydowanie bardziej widoczne. Jak już wcześniej w tym projekcie zaznaczyłem - Sudan od wielu lat mierzy się z szalejącą inflacją, która osiągnęła swoje apogeum w 2021 roku, wynosząc aż 395%!
+
+## Wnioski końcowe
+
+Jeśli chciałbym wyciągnąć jakieś wnioski z tego całego projektu, to takie, że nie można oceniać innych krajów tylko po niektórych, oczywistych czynnikach. Sam próbowałem tak zrobić - skategoryzować kraje używając jedynie zmiennej GDP_per_person, co jest błędne. To, jaki budżet ma państwo nie definiuje klasy kraju, bo na nią wpływa wiele innych czynników. I oczyiwście - niektóre regiony świata są biedniejsze, lub też mniej rozwinięte od innych, jednak trzeba pamięta, że to, że jakies państwo leży w "biedniejszych" regionach świata, wcale nie oznacza że jest takie biedne. Tak jak mówiłem, jeśli chodzi o klasowanie krajów, Polsce najbliżej jest do Urugwaju, kraju który mogłoby się wydawać z pozoru jest o wiele mniej rozwiniętym Państwem niż kraj uni europejckiej taki jak Polska, jednak jak widać nic bardziej mylnego. Zanim zacznemy oceniać inne państwa spójrzmy w dane i wyciągnijmy jakieś wnioski, ponieważ jest taka możliwość, że nasze uprzedzenia mogą okazać się być mylne. 
