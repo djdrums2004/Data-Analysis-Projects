@@ -11,3 +11,4 @@ Store Data Base - developed a robust, backend-oriented database management syste
 
 Music Industry Statistical Analysis project - a comprehensive statistical study investigating the evolution of music consumption and the physical media market. The project focuses on two main areas: the historical shift from analog to digital formats (1983–1999) and the structural distribution of modern album lengths in the streaming era.
 
+Music Industry Presentation - this project, titled "The Music Market Over the Years," is a comprehensive statistical and business study of the evolution of music consumption and changes in dominant media formats. The analysis covers two main areas: the historical transition from analog to digital formats and the characteristics of the contemporary streaming market.
