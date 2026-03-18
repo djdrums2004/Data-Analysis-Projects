@@ -7,4 +7,7 @@ Macroeconomic Analysis - A comprehensive end-to-end data science project focused
 
 Data Analysis In Academic Research project - A specialized research project focused on solving complex classification problems where data classes exhibit non-linear geometric structures (e.g., "Saturn’s Ring" patterns). The study compares the effectiveness of traditional linear methods against advanced non-linear transformations.
 
-Store Data Base - Developed a robust, backend-oriented database management system for an online store using Python and MongoDB. The project focuses on data integrity, complex transaction handling (orders/stock), and advanced analytical reporting using NoSQL aggregation pipelines.
+Store Data Base - developed a robust, backend-oriented database management system for an online store using Python and MongoDB. The project focuses on data integrity, complex transaction handling (orders/stock), and advanced analytical reporting using NoSQL aggregation pipelines.
+
+Music Industry Statistical Analysis project - a comprehensive statistical study investigating the evolution of music consumption and the physical media market. The project focuses on two main areas: the historical shift from analog to digital formats (1983–1999) and the structural distribution of modern album lengths in the streaming era.
+
