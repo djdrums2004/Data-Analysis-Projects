@@ -7,4 +7,4 @@ Macroeconomic Analysis - A comprehensive end-to-end data science project focused
 
 Data Analysis In Academic Research project - A specialized research project focused on solving complex classification problems where data classes exhibit non-linear geometric structures (e.g., "Saturn’s Ring" patterns). The study compares the effectiveness of traditional linear methods against advanced non-linear transformations.
 
-Store Data Base - 
+Store Data Base - Developed a robust, backend-oriented database management system for an online store using Python and MongoDB. The project focuses on data integrity, complex transaction handling (orders/stock), and advanced analytical reporting using NoSQL aggregation pipelines.
